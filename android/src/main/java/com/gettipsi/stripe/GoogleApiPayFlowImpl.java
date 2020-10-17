@@ -2,7 +2,7 @@ package com.gettipsi.stripe;
 
 import android.app.Activity;
 import android.content.Intent;
-import android.support.annotation.NonNull;
+import androidx.annotation.NonNull;
 
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReadableMap;
@@ -26,6 +26,9 @@ import com.google.android.gms.wallet.Wallet;
 import com.google.android.gms.wallet.WalletConstants;
 import com.stripe.android.BuildConfig;
 import com.stripe.android.model.Token;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -229,19 +232,24 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
           case Activity.RESULT_OK:
             PaymentData paymentData = PaymentData.getFromIntent(data);
             ArgCheck.nonNull(paymentData);
-            String tokenJson = paymentData.getPaymentMethodToken().getToken();
-            Token token = Token.fromString(tokenJson);
-            if (token == null) {
-              payPromise.reject(
-                getErrorCode("parseResponse"),
-                getErrorDescription("parseResponse")
-              );
-            } else {
-              payPromise.resolve(putExtraToTokenMap(
-                convertTokenToWritableMap(token),
-                getBillingAddress(paymentData),
-                paymentData.getShippingAddress(),
-                paymentData.getEmail()));
+            JSONObject tokenJson = null;
+            try {
+              tokenJson = new JSONObject(paymentData.getPaymentMethodToken().getToken());
+              Token token = Token.fromJson(tokenJson);
+              if (token == null) {
+                payPromise.reject(
+                  getErrorCode("parseResponse"),
+                  getErrorDescription("parseResponse")
+                );
+              } else {
+                payPromise.resolve(putExtraToTokenMap(
+                  convertTokenToWritableMap(token),
+                  getBillingAddress(paymentData),
+                  paymentData.getShippingAddress(),
+                  paymentData.getEmail()));
+              }
+            } catch (JSONException e) {
+              throw new RuntimeException(e);
             }
             break;
           case Activity.RESULT_CANCELED:
