@@ -254,7 +254,7 @@ void initializeTPSPaymentNetworksWithConditionalMappings() {
     mapTPSPaymentNetworkToPKPaymentNetwork = tmp;
 }
 
-@interface StripeModule () <STPAuthenticationContext>
+@interface StripeModule () <STPAuthenticationContext, STPApplePayContextDelegate>
 {
     NSString *publishableKey;
     NSString *merchantId;
@@ -267,6 +267,7 @@ void initializeTPSPaymentNetworksWithConditionalMappings() {
     BOOL requestIsCompleted;
 
     void (^applePayCompletion)(PKPaymentAuthorizationStatus);
+    STPIntentClientSecretCompletionBlock applePayIntentCompletion;
     NSError *applePayStripeError;
 }
 @end
@@ -406,7 +407,7 @@ RCT_EXPORT_METHOD(confirmPaymentIntent:(NSDictionary<NSString*, id>*)untypedPara
                                                                                                     [self resolvePromise: [self convertConfirmPaymentIntentResult: intent]];
                                                                                                     return;
                                                                                                 case STPPaymentHandlerActionStatusCanceled:
-                                                                                                    [self rejectPromiseWithCode:[self->errorCodes valueForKey:kErrorKeyCancelled][kErrorKeyCode]
+                                                                                                    [self rejectPromiseWithCode:[self->errorCodes   valueForKey:kErrorKeyCancelled][kErrorKeyCode]
                                                                                                                         message:error.localizedDescription ?: [self->errorCodes valueForKey:kErrorKeyCancelled][kErrorKeyDescription]
                                                                                                                           error:error];
                                                                                                     return;
@@ -810,6 +811,24 @@ RCT_EXPORT_METHOD(paymentRequestWithCardForm:(NSDictionary *)options
     });
 }
 
+RCT_EXPORT_METHOD(completeApplePayIntent:(NSString *)clientSecret
+                                    resolver:(RCTPromiseResolveBlock)resolve
+                                    rejecter:(RCTPromiseRejectBlock)reject) {
+    if(!requestIsCompleted) {
+        NSDictionary *error = [errorCodes valueForKey:kErrorKeyBusy];
+        reject(error[kErrorKeyCode], error[kErrorKeyDescription], nil);
+        return;
+    }
+
+    requestIsCompleted = NO;
+    // Save promise handlers to use for `STPApplePayContextDelegate` methods
+    promiseResolver = resolve;
+    promiseRejector = reject;
+    if (applePayIntentCompletion) {
+        applePayIntentCompletion(clientSecret, nil);
+    }
+}
+
 RCT_EXPORT_METHOD(paymentRequestWithApplePay:(NSArray *)items
                   withOptions:(NSDictionary *)options
                   resolver:(RCTPromiseResolveBlock)resolve
@@ -831,7 +850,7 @@ RCT_EXPORT_METHOD(paymentRequestWithApplePay:(NSArray *)items
     NSMutableArray *shippingMethodsItems = options[@"shippingMethods"] ? options[@"shippingMethods"] : [NSMutableArray array];
     NSString* currencyCode = options[@"currencyCode"] ? options[@"currencyCode"] : @"USD";
     NSString* countryCode = options[@"countryCode"] ? options[@"countryCode"] : @"US";
-
+    
     NSMutableArray *shippingMethods = [NSMutableArray array];
 
     for (NSDictionary *item in shippingMethodsItems) {
@@ -862,15 +881,29 @@ RCT_EXPORT_METHOD(paymentRequestWithApplePay:(NSArray *)items
     [paymentRequest setShippingType:shippingType];
 
     if ([self canSubmitPaymentRequest:paymentRequest rejecter:reject]) {
-        PKPaymentAuthorizationViewController *paymentAuthorizationVC = [[PKPaymentAuthorizationViewController alloc] initWithPaymentRequest:paymentRequest];
-        paymentAuthorizationVC.delegate = self;
+        BOOL usePaymentIntent = [options[@"usePaymentIntent"] boolValue];
+        if (usePaymentIntent) {
+            STPApplePayContext *applePayContext = [[STPApplePayContext alloc] initWithPaymentRequest:paymentRequest delegate:self];
+           if (applePayContext) {
+               applePayContext.apiClient.stripeAccount = stripeAccount;
+               // Present Apple Pay payment sheet
+               [applePayContext presentApplePayOnViewController:RCTPresentedViewController() completion:nil];
+           } else {
+               // There is a problem with your Apple Pay configuration
+               [self resetPromiseCallbacks];
+               requestIsCompleted = YES;
+           }
+        } else {
+            PKPaymentAuthorizationViewController *paymentAuthorizationVC = [[PKPaymentAuthorizationViewController alloc] initWithPaymentRequest:paymentRequest];
+            paymentAuthorizationVC.delegate = self;
 
-        // move to the end of main queue
-        // allow the execution of hiding modal
-        // to be finished first
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [RCTPresentedViewController() presentViewController:paymentAuthorizationVC animated:YES completion:nil];
-        });
+            // move to the end of main queue
+            // allow the execution of hiding modal
+            // to be finished first
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [RCTPresentedViewController() presentViewController:paymentAuthorizationVC animated:YES completion:nil];
+            });
+        }
     } else {
         // There is a problem with your Apple Pay configuration.
         [self resetPromiseCallbacks];
@@ -1181,6 +1214,7 @@ RCT_EXPORT_METHOD(openApplePaySetup) {
 
 - (void)resetApplePayCallback {
     applePayCompletion = nil;
+    applePayIntentCompletion = nil;
 }
 
 - (BOOL)canSubmitPaymentRequest:(PKPaymentRequest *)paymentRequest rejecter:(RCTPromiseRejectBlock)reject {
@@ -1228,7 +1262,49 @@ RCT_EXPORT_METHOD(openApplePaySetup) {
     }
 }
 
-#pragma mark PKPaymentAuthorizationViewControllerDelegate
+
+#pragma mark - STPApplePayContextDelegate
+
+- (void)applePayContext:(STPApplePayContext *)context didCreatePaymentMethod:(STPPaymentMethod *)paymentMethod paymentInformation:(PKPayment *)paymentInformation completion:(STPIntentClientSecretCompletionBlock)completion {
+    applePayIntentCompletion = completion;
+    
+    self->requestIsCompleted = YES;
+    NSMutableDictionary *result = [@{} mutableCopy];
+    [result setValue:paymentMethod.stripeId forKey:@"tokenId"];
+    [self resolvePromise:result];
+    
+    [RCTPresentedViewController() dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)applePayContext:(STPApplePayContext *)context didCompleteWithStatus:(STPPaymentStatus)status error:(NSError *)error {
+    [self resetApplePayCallback];
+    self->requestIsCompleted = YES;
+    
+    switch (status) {
+        case STPPaymentStatusSuccess:
+            // Payment succeeded, show a receipt view
+            [self resolvePromise:nil];
+            break;
+
+        case STPPaymentStatusError:
+            // Payment failed, show the error
+            if (error) {
+                NSDictionary *err = [self->errorCodes valueForKey:kErrorKeyApi];
+                [self rejectPromiseWithCode:err[kErrorKeyCode]
+                                    message:error.localizedDescription
+                                      error:error];
+            }
+            break;
+
+        case STPPaymentStatusUserCancellation: {
+            NSDictionary *err = [self->errorCodes valueForKey:kErrorKeyCancelled];
+            [self rejectPromiseWithCode:err[kErrorKeyCode] message:err[kErrorKeyDescription]];
+            break;
+        }
+    }
+}
+
+#pragma mark - PKPaymentAuthorizationViewControllerDelegate
 
 - (void)paymentAuthorizationViewController:(PKPaymentAuthorizationViewController *)controller
                        didAuthorizePayment:(PKPayment *)payment

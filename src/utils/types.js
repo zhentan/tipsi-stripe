@@ -116,6 +116,7 @@ export const paymentRequestWithApplePayOptionsPropTypes = {
   requiredShippingAddressFields: PropTypes.arrayOf(applePayAddressFieldsPropTypes),
   shippingMethods: PropTypes.arrayOf(PropTypes.shape(applePayOptionShippingMethodPropTypes)),
   shippingType: PropTypes.oneOf(availableApplePayShippingTypes),
+  usePaymentInent: PropTypes.bool,
 }
 
 export const paymentRequestWithCardFormOptionsPropTypes = {

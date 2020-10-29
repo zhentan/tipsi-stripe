@@ -177,6 +177,7 @@ test('paymentRequestWithApplePayOptionsPropTypes', (t) => {
         amount: 'amount',
       }],
       shippingType,
+      usePaymentIntent: true,
     }
 
     t.doesNotThrow(checkPropTypes(paymentRequestWithApplePayOptionsPropTypes, passedProps))
