@@ -28,12 +28,12 @@ import com.stripe.android.PaymentIntentResult;
 import com.stripe.android.SetupIntentResult;
 import com.stripe.android.Stripe;
 import com.stripe.android.model.Address;
+import com.stripe.android.model.CardParams;
 import com.stripe.android.model.ConfirmPaymentIntentParams;
 import com.stripe.android.model.ConfirmSetupIntentParams;
 import com.stripe.android.model.PaymentMethod;
 import com.stripe.android.model.PaymentMethodCreateParams;
 import com.stripe.android.model.Source;
-import com.stripe.android.model.Source.Status;
 import com.stripe.android.model.SourceParams;
 import com.stripe.android.model.StripeIntent;
 import com.stripe.android.model.Token;
@@ -54,7 +54,7 @@ import static com.gettipsi.stripe.util.Converters.convertSetupIntentResultToWrit
 import static com.gettipsi.stripe.util.Converters.convertSourceToWritableMap;
 import static com.gettipsi.stripe.util.Converters.convertTokenToWritableMap;
 import static com.gettipsi.stripe.util.Converters.createBankAccount;
-import static com.gettipsi.stripe.util.Converters.createCard;
+import static com.gettipsi.stripe.util.Converters.createCardParams;
 import static com.gettipsi.stripe.util.Converters.getBooleanOrNull;
 import static com.gettipsi.stripe.util.Converters.getMapOrNull;
 import static com.gettipsi.stripe.util.Converters.getStringOrNull;
@@ -198,11 +198,12 @@ public class StripeModule extends ReactContextBaseJavaModule {
   public void createTokenWithCard(final ReadableMap cardData, final Promise promise) {
     try {
       ArgCheck.nonNull(mStripe);
-      ArgCheck.notEmptyString(mPublicKey);
 
+      CardParams cardParams = createCardParams(cardData);
       mStripe.createCardToken(
-        createCard(cardData),
-        mPublicKey,
+        cardParams,
+        null,
+        null,
         new ApiResultCallback<Token>() {
           public void onSuccess(Token token) {
             promise.resolve(convertTokenToWritableMap(token));

@@ -21,6 +21,7 @@ import com.stripe.android.model.BankAccountTokenParams;
 import com.stripe.android.model.Card;
 import com.stripe.android.model.CardBrand;
 import com.stripe.android.model.CardFunding;
+import com.stripe.android.model.CardParams;
 import com.stripe.android.model.PaymentIntent;
 import com.stripe.android.model.PaymentMethod;
 import com.stripe.android.model.SetupIntent;
@@ -208,7 +209,24 @@ public class Converters {
       .build();
   }
 
-
+  public static CardParams createCardParams(final ReadableMap cardData) {
+    Address address = new Address.Builder().
+      setCity(getValue(cardData, "addressCity")).
+      setCountry(getValue(cardData, "addressCountry")).
+      setLine1(getValue(cardData, "addressLine1")).
+      setLine2(getValue(cardData, "addressLine2")).
+      setPostalCode(getValue(cardData, "addressZip")).
+      setState(getValue(cardData, "addressState")).
+      build();
+    return new CardParams(
+      cardData.getString("number"),
+      cardData.getInt("expMonth"),
+      cardData.getInt("expYear"),
+      getValue(cardData, "cvc"),
+      getValue(cardData, "name"),
+      address,
+      getValue(cardData, "currency"));
+  }
 
   @NonNull
   public static WritableMap convertSourceToWritableMap(@Nullable Source source) {
