@@ -6,6 +6,7 @@ import androidx.annotation.NonNull;
 
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.WritableMap;
 import com.gettipsi.stripe.util.ArgCheck;
 import com.gettipsi.stripe.util.Converters;
 import com.gettipsi.stripe.util.Fun0;
@@ -24,9 +25,14 @@ import com.google.android.gms.wallet.ShippingAddressRequirements;
 import com.google.android.gms.wallet.TransactionInfo;
 import com.google.android.gms.wallet.Wallet;
 import com.google.android.gms.wallet.WalletConstants;
-import com.stripe.android.BuildConfig;
+import com.stripe.android.ApiResultCallback;
+import com.stripe.android.GooglePayConfig;
+import com.stripe.android.Stripe;
+import com.stripe.android.model.PaymentMethod;
+import com.stripe.android.model.PaymentMethodCreateParams;
 import com.stripe.android.model.Token;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -34,12 +40,15 @@ import java.util.Arrays;
 import java.util.Collection;
 
 import static com.gettipsi.stripe.Errors.toErrorCode;
+import static com.gettipsi.stripe.util.Converters.convertPaymentMethodToWritableMap;
 import static com.gettipsi.stripe.util.Converters.convertTokenToWritableMap;
 import static com.gettipsi.stripe.util.Converters.getAllowedShippingCountryCodes;
 import static com.gettipsi.stripe.util.Converters.getBillingAddress;
 import static com.gettipsi.stripe.util.Converters.putExtraToTokenMap;
+import static com.gettipsi.stripe.util.PayParams.ANDROID_PAY_USE_PAYMENT_INTENT;
 import static com.gettipsi.stripe.util.PayParams.CURRENCY_CODE;
 import static com.gettipsi.stripe.util.PayParams.BILLING_ADDRESS_REQUIRED;
+import static com.gettipsi.stripe.util.PayParams.DESCRIPTION;
 import static com.gettipsi.stripe.util.PayParams.SHIPPING_ADDRESS_REQUIRED;
 import static com.gettipsi.stripe.util.PayParams.PHONE_NUMBER_REQUIRED;
 import static com.gettipsi.stripe.util.PayParams.EMAIL_REQUIRED;
@@ -56,6 +65,7 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
 
   private PaymentsClient mPaymentsClient;
   private Promise payPromise;
+  public GooglePayConfig googlePayConfig;
 
   public GoogleApiPayFlowImpl(@NonNull Fun0<Activity> activityProvider) {
     super(activityProvider);
@@ -108,6 +118,7 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
     final boolean shippingAddressRequired = Converters.getValue(payParams, SHIPPING_ADDRESS_REQUIRED, false);
     final boolean phoneNumberRequired = Converters.getValue(payParams, PHONE_NUMBER_REQUIRED, false);
     final boolean emailRequired = Converters.getValue(payParams, EMAIL_REQUIRED, false);
+
     final Collection<String> allowedCountryCodes = getAllowedShippingCountryCodes(payParams);
 
     return createPaymentDataRequest(
@@ -119,6 +130,62 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
       emailRequired,
       allowedCountryCodes
     );
+  }
+
+  @NonNull
+  private PaymentDataRequest createPaymentDataJsonRequest(ReadableMap payParams) {
+    try {
+      final String totalPrice = payParams.getString(TOTAL_PRICE);
+      final String currencyCode = payParams.getString(CURRENCY_CODE);
+      final boolean billingAddressRequired = Converters.getValue(payParams, BILLING_ADDRESS_REQUIRED, false);
+      final boolean phoneNumberRequired = Converters.getValue(payParams, PHONE_NUMBER_REQUIRED, false);
+      final boolean emailRequired = Converters.getValue(payParams, EMAIL_REQUIRED, false);
+
+      final JSONObject tokenizationSpec = googlePayConfig.getTokenizationSpecification();
+      final JSONObject cardPaymentMethod = new JSONObject()
+        .put("type", "CARD")
+        .put("parameters", new JSONObject()
+          .put("allowedAuthMethods", new JSONArray()
+            .put("PAN_ONLY")
+            .put("CRYPTOGRAM_3DS"))
+          .put("allowedCardNetworks", new JSONArray()
+            .put("AMEX")
+            .put("DISCOVER")
+            .put("MASTERCARD")
+            .put("VISA")
+          )
+          // require billing address
+          .put("billingAddressRequired", billingAddressRequired)
+          .put("billingAddressParameters", new JSONObject()
+            // require full billing address
+            .put("format", "MIN")
+
+            // require phone number
+            .put("phoneNumberRequired", phoneNumberRequired)
+          )
+        )
+        .put("tokenizationSpecification", tokenizationSpec);
+
+      // create PaymentDataRequest
+      final JSONObject paymentDataRequest = new JSONObject()
+        .put("apiVersion", 2)
+        .put("apiVersionMinor", 0)
+        .put("allowedPaymentMethods", new JSONArray().put(cardPaymentMethod))
+        .put("transactionInfo", new JSONObject()
+          .put("totalPrice", totalPrice)
+          .put("totalPriceStatus", "FINAL")
+          .put("currencyCode", currencyCode)
+        )
+        .put("merchantInfo", new JSONObject()
+          .put("merchantName", "SPIN"))
+
+        // require email address
+        .put("emailRequired", emailRequired);
+
+      return PaymentDataRequest.fromJson(paymentDataRequest.toString());
+    } catch (JSONException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   private PaymentDataRequest createPaymentDataRequest(@NonNull final String totalPrice,
@@ -186,6 +253,9 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
     ArgCheck.nonNull(payParams);
     ArgCheck.nonNull(promise);
 
+    final boolean usePaymentIntent = Converters.getBooleanOrNull(payParams, ANDROID_PAY_USE_PAYMENT_INTENT, false);
+    setUsePaymentIntent(usePaymentIntent);
+
     Activity activity = activityProvider.call();
     if (activity == null) {
       promise.reject(
@@ -196,7 +266,15 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
     }
 
     this.payPromise = promise;
-    startPaymentRequest(activity, createPaymentDataRequest(payParams));
+    PaymentDataRequest request;
+    if (usePaymentIntent) {
+      request = createPaymentDataJsonRequest(payParams);
+    } else {
+      request = createPaymentDataRequest(payParams);
+    }
+    startPaymentRequest(activity, request);
+
+
   }
 
   @Override
@@ -230,26 +308,57 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
       case LOAD_PAYMENT_DATA_REQUEST_CODE:
         switch (resultCode) {
           case Activity.RESULT_OK:
-            PaymentData paymentData = PaymentData.getFromIntent(data);
+            final PaymentData paymentData = PaymentData.getFromIntent(data);
             ArgCheck.nonNull(paymentData);
-            JSONObject tokenJson = null;
-            try {
-              tokenJson = new JSONObject(paymentData.getPaymentMethodToken().getToken());
-              Token token = Token.fromJson(tokenJson);
-              if (token == null) {
-                payPromise.reject(
-                  getErrorCode("parseResponse"),
-                  getErrorDescription("parseResponse")
+            if (getUsePaymentIntent()) {
+              try {
+                final JSONObject paymentDataJson = new JSONObject(paymentData.toJson());
+                final PaymentMethodCreateParams paymentMethodCreateParams = PaymentMethodCreateParams.createFromGooglePay(paymentDataJson);
+                final Stripe stripe = getStripe();
+                stripe.createPaymentMethod(
+                  paymentMethodCreateParams,
+                  new ApiResultCallback<PaymentMethod>() {
+                    @Override
+                    public void onSuccess(@NonNull PaymentMethod paymentMethod) {
+                      WritableMap wm = convertPaymentMethodToWritableMap(paymentMethod);
+                      wm.putString("tokenId", paymentMethod.id);
+                      payPromise.resolve(wm);
+                      payPromise = null;
+                    }
+
+                    @Override
+                    public void onError(@NonNull Exception e) {
+                      payPromise.reject(
+                        getErrorCode("parseResponse"),
+                        getErrorDescription("parseResponse")
+                      );
+                      payPromise = null;
+                    }
+                  }
                 );
-              } else {
-                payPromise.resolve(putExtraToTokenMap(
-                  convertTokenToWritableMap(token),
-                  getBillingAddress(paymentData),
-                  paymentData.getShippingAddress(),
-                  paymentData.getEmail()));
+              } catch (JSONException e) {
+                throw new RuntimeException(e);
               }
-            } catch (JSONException e) {
-              throw new RuntimeException(e);
+            } else {
+              JSONObject tokenJson = null;
+              try {
+                tokenJson = new JSONObject(paymentData.getPaymentMethodToken().getToken());
+                Token token = Token.fromJson(tokenJson);
+                if (token == null) {
+                  payPromise.reject(
+                    getErrorCode("parseResponse"),
+                    getErrorDescription("parseResponse")
+                  );
+                } else {
+                  payPromise.resolve(putExtraToTokenMap(
+                    convertTokenToWritableMap(token),
+                    getBillingAddress(paymentData),
+                    paymentData.getShippingAddress(),
+                    paymentData.getEmail()));
+                }
+              } catch (JSONException e) {
+                throw new RuntimeException(e);
+              }
             }
             break;
           case Activity.RESULT_CANCELED:
@@ -272,7 +381,9 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
           default:
             // Do nothing.
         }
-        payPromise = null;
+        if (getUsePaymentIntent() == false) {
+          payPromise = null;
+        }
         return true;
     }
 

@@ -24,6 +24,8 @@ import com.gettipsi.stripe.util.Fun0;
 import com.google.android.gms.wallet.WalletConstants;
 import com.stripe.android.ApiResultCallback;
 import com.stripe.android.AppInfo;
+import com.stripe.android.GooglePayConfig;
+import com.stripe.android.PaymentConfiguration;
 import com.stripe.android.PaymentIntentResult;
 import com.stripe.android.SetupIntentResult;
 import com.stripe.android.Stripe;
@@ -187,11 +189,17 @@ public class StripeModule extends ReactContextBaseJavaModule {
   @ReactMethod
   public void setStripeAccount(final String stripeAccount) {
     ArgCheck.notEmptyString(mPublicKey);
+    GoogleApiPayFlowImpl gpayflow = (GoogleApiPayFlowImpl) getPayFlow();
     if (stripeAccount == null) {
       mStripe = new Stripe(getReactApplicationContext(), mPublicKey);
+      PaymentConfiguration.init(getReactApplicationContext(), mPublicKey);
+      gpayflow.googlePayConfig = new GooglePayConfig(mPublicKey);
     } else {
       mStripe = new Stripe(getReactApplicationContext(), mPublicKey, stripeAccount);
+      PaymentConfiguration.init(getReactApplicationContext(), mPublicKey, stripeAccount);
+      gpayflow.googlePayConfig = new GooglePayConfig(mPublicKey, stripeAccount);
     }
+    gpayflow.setStripe(mStripe);
   }
 
   @ReactMethod

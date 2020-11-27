@@ -12,6 +12,7 @@ import com.gettipsi.stripe.util.Fun0;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.GoogleApiAvailability;
 import com.google.android.gms.wallet.WalletConstants;
+import com.stripe.android.Stripe;
 
 public abstract class PayFlow {
 
@@ -19,6 +20,9 @@ public abstract class PayFlow {
   private String publishableKey; // invalid value by default
   private int environment; // invalid value by default
   private ReadableMap errorCodes; // invalid value by default, set in runtime
+  private boolean usePaymentIntent;
+  private Stripe mStripe;
+
 
   public PayFlow(@NonNull Fun0<Activity> activityProvider) {
     ArgCheck.nonNull(activityProvider);
@@ -50,6 +54,22 @@ public abstract class PayFlow {
     ArgCheck.isTrue(!isEnvironmentChangeAttempt(this.environment, environment));
 
     this.environment = environment;
+  }
+
+  protected boolean getUsePaymentIntent() {
+    return usePaymentIntent;
+  }
+
+  public void setUsePaymentIntent(boolean usePaymentIntent) {
+    this.usePaymentIntent = usePaymentIntent;
+  }
+
+  protected Stripe getStripe() {
+    return mStripe;
+  }
+
+  public void setStripe(Stripe stripe) {
+    this.mStripe = stripe;
   }
 
   protected String getPublishableKey() {
