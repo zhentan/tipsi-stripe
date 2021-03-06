@@ -22,7 +22,8 @@ import org.xmlpull.v1.XmlPullParser;
  * Created by dmitriy on 11/15/16
  */
 
-public class CustomCardInputReactManager extends SimpleViewManager<CreditCardForm> {
+public class CustomCardInputReactManager extends SimpleViewManager<CreditCardFormExtension
+  > {
 
   public static final String REACT_CLASS = "TPSCardField";
   private static final String TAG = CustomCardInputReactManager.class.getSimpleName();
@@ -30,6 +31,7 @@ public class CustomCardInputReactManager extends SimpleViewManager<CreditCardFor
   private static final String EXP_MONTH = "expMonth";
   private static final String EXP_YEAR = "expYear";
   private static final String CCV = "cvc";
+  private static final String ZIPCODE = "addressZip";
 
   private ThemedReactContext reactContext;
   private WritableMap currentParams;
@@ -38,6 +40,7 @@ public class CustomCardInputReactManager extends SimpleViewManager<CreditCardFor
   private int currentMonth;
   private int currentYear;
   private String currentCCV;
+  private String currentZipcode;
 
   @Override
   public String getName() {
@@ -45,7 +48,7 @@ public class CustomCardInputReactManager extends SimpleViewManager<CreditCardFor
   }
 
   @Override
-  protected CreditCardForm createViewInstance(final ThemedReactContext reactContext) {
+  protected CreditCardFormExtension createViewInstance(final ThemedReactContext reactContext) {
     XmlPullParser parser = reactContext.getResources().getXml(R.xml.stub_material);
     try {
       parser.next();
@@ -55,7 +58,7 @@ public class CustomCardInputReactManager extends SimpleViewManager<CreditCardFor
     }
 
     AttributeSet attr = Xml.asAttributeSet(parser);
-    final CreditCardForm creditCardForm = new CreditCardForm(reactContext, attr);
+    final CreditCardFormExtension creditCardForm = new CreditCardFormExtension(reactContext, attr);
     setListeners(creditCardForm);
     this.reactContext = reactContext;
     creditCardForm.post(new Runnable() {
@@ -69,53 +72,59 @@ public class CustomCardInputReactManager extends SimpleViewManager<CreditCardFor
     return creditCardForm;
   }
 
+  @ReactProp(name = "postalCodeEntryEnabled")
+  public void postalCodeEntryEnabled(CreditCardFormExtension view, boolean enabled){
+    view.setIncludeZip(reactContext, enabled);
+    setListeners(view);
+  }
+
   @ReactProp(name = "enabled")
-  public void setEnabled(CreditCardForm view, boolean enabled) {
+  public void setEnabled(CreditCardFormExtension view, boolean enabled) {
     view.setEnabled(enabled);
   }
 
   @ReactProp(name = "backgroundColor")
-  public void setBackgroundColor(CreditCardForm view, int color) {
+  public void setBackgroundColor(CreditCardFormExtension view, int color) {
     Log.d("TAG", "setBackgroundColor: "+color);
     view.setBackgroundColor(color);
   }
 
   @ReactProp(name = "cardNumber")
-  public void setCardNumber(CreditCardForm view, String cardNumber) {
+  public void setCardNumber(CreditCardFormExtension view, String cardNumber) {
     view.setCardNumber(cardNumber, true);
   }
 
   @ReactProp(name = "expDate")
-  public void setExpDate(CreditCardForm view, String expDate) {
+  public void setExpDate(CreditCardFormExtension view, String expDate) {
     view.setExpDate(expDate, true);
   }
 
   @ReactProp(name = "securityCode")
-  public void setSecurityCode(CreditCardForm view, String securityCode) {
+  public void setSecurityCode(CreditCardFormExtension view, String securityCode) {
     view.setSecurityCode(securityCode, true);
   }
 
   @ReactProp(name = "numberPlaceholder")
-  public void setCreditCardTextHint(CreditCardForm view, String creditCardTextHint) {
+  public void setCreditCardTextHint(CreditCardFormExtension view, String creditCardTextHint) {
     view.setCreditCardTextHint(creditCardTextHint);
   }
 
   @ReactProp(name = "expirationPlaceholder")
-  public void setExpDateTextHint(CreditCardForm view, String expDateTextHint) {
+  public void setExpDateTextHint(CreditCardFormExtension view, String expDateTextHint) {
     view.setExpDateTextHint(expDateTextHint);
   }
 
   @ReactProp(name = "cvcPlaceholder")
-  public void setSecurityCodeTextHint(CreditCardForm view, String securityCodeTextHint) {
+  public void setSecurityCodeTextHint(CreditCardFormExtension view, String securityCodeTextHint) {
     view.setSecurityCodeTextHint(securityCodeTextHint);
   }
 
-
-  private void setListeners(final CreditCardForm view){
+  private void setListeners(final CreditCardFormExtension view){
 
     final EditText ccNumberEdit = (EditText) view.findViewById(R.id.cc_card);
     final EditText ccExpEdit = (EditText) view.findViewById(R.id.cc_exp);
     final EditText ccCcvEdit = (EditText) view.findViewById(R.id.cc_ccv);
+    final EditText ccZipEdit = (EditText) view.findViewById(R.id.cc_zip);
 
     ccNumberEdit.addTextChangedListener(new TextWatcher() {
       @Override
@@ -177,20 +186,42 @@ public class CustomCardInputReactManager extends SimpleViewManager<CreditCardFor
       public void afterTextChanged(Editable editable) {
       }
     });
+
+    if (ccZipEdit != null) {
+      ccZipEdit.addTextChangedListener(new TextWatcher() {
+        @Override
+        public void beforeTextChanged(CharSequence charSequence, int start, int count, int after) {
+        }
+
+        @Override
+        public void onTextChanged(CharSequence charSequence, int start, int before, int count) {
+          Log.d(TAG, "onTextChanged: ZIPCODE = " + charSequence);
+          currentZipcode = charSequence.toString();
+          postEvent(view);
+        }
+
+        @Override
+        public void afterTextChanged(Editable s) {
+        }
+      });
+    }
+
   }
 
-  private void postEvent(CreditCardForm view){
+  private void postEvent(CreditCardFormExtension view){
     currentParams = Arguments.createMap();
     currentParams.putString(NUMBER, currentNumber);
     currentParams.putInt(EXP_MONTH, currentMonth);
     currentParams.putInt(EXP_YEAR, currentYear);
     currentParams.putString(CCV, currentCCV);
+    currentParams.putString(ZIPCODE, currentZipcode);
+    boolean isValid = view.isCreditCardValid();
     reactContext.getNativeModule(UIManagerModule.class)
       .getEventDispatcher().dispatchEvent(
-      new CreditCardFormOnChangeEvent(view.getId(), currentParams, view.isCreditCardValid()));
+      new CreditCardFormOnChangeEvent(view.getId(), currentParams, isValid));
   }
 
-  private void updateView(CreditCardForm view){
+  private void updateView(CreditCardFormExtension view){
 
   }
 }
