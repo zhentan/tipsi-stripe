@@ -177,18 +177,15 @@ export const createTokenWithBankAccountParamsPropTypes = {
   accountHolderType: PropTypes.oneOf(['company', 'individual']),
 }
 
-export const androidPayLineItemPropTypes = {
-  currency_code: PropTypes.string.isRequired,
-  total_price: PropTypes.string.isRequired,
-  unit_price: PropTypes.string.isRequired,
-  quantity: PropTypes.string.isRequired,
-  description: PropTypes.string.isRequired,
+export const androidPayItemsPropTypes = {
+  label: PropTypes.string.isRequired,
+  amount: PropTypes.string.isRequired,
 }
 
 export const paymentRequestWithAndroidPayOptionsPropTypes = {
-  total_price: PropTypes.string.isRequired,
-  currency_code: PropTypes.string.isRequired,
-  line_items: PropTypes.arrayOf(PropTypes.shape(androidPayLineItemPropTypes)).isRequired,
+  currencyCode: PropTypes.string.isRequired,
+  countryCode: PropTypes.string.isRequired,
+  items: PropTypes.arrayOf(PropTypes.shape(androidPayItemsPropTypes)).isRequired,
   shipping_address_required: PropTypes.bool,
   billing_address_required: PropTypes.bool,
   email_address_required: PropTypes.bool,

@@ -60,7 +60,10 @@ const deprecatedMethodsForInstance = (instance) => ({
   paymentRequestWithNativePay: (options = {}, items = []) => {
     return Platform.select({
       ios: () => instance.paymentRequestWithApplePay(items, options),
-      android: () => instance.paymentRequestWithAndroidPay(options),
+      android: () => instance.paymentRequestWithAndroidPay({
+        ...options,
+        items,
+      }),
     })()
   },
 

@@ -210,7 +210,10 @@ class Stripe {
   paymentRequestWithNativePay(options = {}, items = []) {
     return Platform.select({
       ios: () => this.paymentRequestWithApplePay(items, options),
-      android: () => this.paymentRequestWithAndroidPay(options),
+      android: () => this.paymentRequestWithAndroidPay({
+        ...options,
+        items,
+      }),
     })()
   }
 

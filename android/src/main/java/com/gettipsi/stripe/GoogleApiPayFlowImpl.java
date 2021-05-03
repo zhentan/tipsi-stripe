@@ -5,6 +5,7 @@ import android.content.Intent;
 import androidx.annotation.NonNull;
 
 import com.facebook.react.bridge.Promise;
+import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableMap;
 import com.gettipsi.stripe.util.ArgCheck;
@@ -36,8 +37,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 
 import static com.gettipsi.stripe.Errors.toErrorCode;
 import static com.gettipsi.stripe.util.Converters.convertPaymentMethodToWritableMap;
@@ -47,9 +50,9 @@ import static com.gettipsi.stripe.util.Converters.getBillingAddress;
 import static com.gettipsi.stripe.util.Converters.putExtraToTokenMap;
 import static com.gettipsi.stripe.util.PayParams.ANDROID_PAY_USE_PAYMENT_INTENT;
 import static com.gettipsi.stripe.util.PayParams.CURRENCY_CODE;
+import static com.gettipsi.stripe.util.PayParams.COUNTRY_CODE;
 import static com.gettipsi.stripe.util.PayParams.BILLING_ADDRESS_REQUIRED;
-import static com.gettipsi.stripe.util.PayParams.DESCRIPTION;
-import static com.gettipsi.stripe.util.PayParams.SHIPPING_ADDRESS_REQUIRED;
+import static com.gettipsi.stripe.util.PayParams.LINE_ITEMS;
 import static com.gettipsi.stripe.util.PayParams.PHONE_NUMBER_REQUIRED;
 import static com.gettipsi.stripe.util.PayParams.EMAIL_REQUIRED;
 import static com.gettipsi.stripe.util.PayParams.TOTAL_PRICE;
@@ -111,129 +114,63 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
       .build();
   }
 
-  private PaymentDataRequest createPaymentDataRequest(ReadableMap payParams) {
-    final String estimatedTotalPrice = payParams.getString(TOTAL_PRICE);
-    final String currencyCode = payParams.getString(CURRENCY_CODE);
-    final boolean billingAddressRequired = Converters.getValue(payParams, BILLING_ADDRESS_REQUIRED, false);
-    final boolean shippingAddressRequired = Converters.getValue(payParams, SHIPPING_ADDRESS_REQUIRED, false);
-    final boolean phoneNumberRequired = Converters.getValue(payParams, PHONE_NUMBER_REQUIRED, false);
-    final boolean emailRequired = Converters.getValue(payParams, EMAIL_REQUIRED, false);
-
-    final Collection<String> allowedCountryCodes = getAllowedShippingCountryCodes(payParams);
-
-    return createPaymentDataRequest(
-      estimatedTotalPrice,
-      currencyCode,
-      billingAddressRequired,
-      shippingAddressRequired,
-      phoneNumberRequired,
-      emailRequired,
-      allowedCountryCodes
-    );
-  }
-
   @NonNull
   private PaymentDataRequest createPaymentDataJsonRequest(ReadableMap payParams) {
     try {
-      final String totalPrice = payParams.getString(TOTAL_PRICE);
+      final ArrayList<Object> items = payParams.getArray(LINE_ITEMS).toArrayList();
+      final HashMap<String, String> item = (HashMap<String, String>) items.get(0);
+      final String totalPrice = item.get(TOTAL_PRICE);
       final String currencyCode = payParams.getString(CURRENCY_CODE);
+      final String countryCode = payParams.getString(COUNTRY_CODE);
       final boolean billingAddressRequired = Converters.getValue(payParams, BILLING_ADDRESS_REQUIRED, false);
       final boolean phoneNumberRequired = Converters.getValue(payParams, PHONE_NUMBER_REQUIRED, false);
       final boolean emailRequired = Converters.getValue(payParams, EMAIL_REQUIRED, false);
 
       final JSONObject tokenizationSpec = googlePayConfig.getTokenizationSpecification();
       final JSONObject cardPaymentMethod = new JSONObject()
-        .put("type", "CARD")
-        .put("parameters", new JSONObject()
-          .put("allowedAuthMethods", new JSONArray()
-            .put("PAN_ONLY")
-            .put("CRYPTOGRAM_3DS"))
-          .put("allowedCardNetworks", new JSONArray()
-            .put("AMEX")
-            .put("DISCOVER")
-            .put("MASTERCARD")
-            .put("VISA")
-          )
-          // require billing address
-          .put("billingAddressRequired", billingAddressRequired)
-          .put("billingAddressParameters", new JSONObject()
-            // require full billing address
-            .put("format", "MIN")
+              .put("type", "CARD")
+              .put("parameters", new JSONObject()
+                      .put("allowedAuthMethods", new JSONArray()
+                      .put("PAN_ONLY")
+                      .put("CRYPTOGRAM_3DS"))
+                      .put("allowedCardNetworks", new JSONArray()
+                              .put("AMEX")
+                              .put("DISCOVER")
+                              .put("MASTERCARD")
+                              .put("VISA")
+                      )
+                      // require billing address
+                      .put("billingAddressRequired", billingAddressRequired)
+                      .put("billingAddressParameters", new JSONObject()
+                              // require full billing address
+                              .put("format", "MIN")
 
-            // require phone number
-            .put("phoneNumberRequired", phoneNumberRequired)
-          )
-        )
-        .put("tokenizationSpecification", tokenizationSpec);
+                              // require phone number
+                              .put("phoneNumberRequired", phoneNumberRequired)
+                      )
+               )
+              .put("tokenizationSpecification", tokenizationSpec);
 
       // create PaymentDataRequest
       final JSONObject paymentDataRequest = new JSONObject()
-        .put("apiVersion", 2)
-        .put("apiVersionMinor", 0)
-        .put("allowedPaymentMethods", new JSONArray().put(cardPaymentMethod))
-        .put("transactionInfo", new JSONObject()
-          .put("totalPrice", totalPrice)
-          .put("totalPriceStatus", "FINAL")
-          .put("currencyCode", currencyCode)
-        )
-        .put("merchantInfo", new JSONObject()
-          .put("merchantName", "SPIN"))
-
-        // require email address
-        .put("emailRequired", emailRequired);
+              .put("apiVersion", 2)
+              .put("apiVersionMinor", 0)
+              .put("allowedPaymentMethods", new JSONArray().put(cardPaymentMethod))
+              .put("transactionInfo", new JSONObject()
+                      .put("totalPrice", totalPrice)
+                      .put("totalPriceStatus", "FINAL")
+                      .put("currencyCode", "currencyCode")
+                      .put("countryCode", countryCode)
+              )
+              .put("merchantInfo", new JSONObject()
+                      .put("merchantName", "SPIN"))
+              // require email address
+              .put("emailRequired", emailRequired);
 
       return PaymentDataRequest.fromJson(paymentDataRequest.toString());
     } catch (JSONException e) {
       throw new RuntimeException(e);
     }
-  }
-
-  private PaymentDataRequest createPaymentDataRequest(@NonNull final String totalPrice,
-                                                      @NonNull final String currencyCode,
-                                                      final boolean billingAddressRequired,
-                                                      final boolean shippingAddressRequired,
-                                                      final boolean phoneNumberRequired,
-                                                      final boolean emailRequired,
-                                                      @NonNull final Collection<String> countryCodes
-  ) {
-
-    ArgCheck.isDouble(totalPrice);
-    ArgCheck.notEmptyString(currencyCode);
-
-    PaymentDataRequest.Builder builder = PaymentDataRequest.newBuilder();
-    builder.setTransactionInfo(
-      TransactionInfo.newBuilder()
-        .setTotalPriceStatus(WalletConstants.TOTAL_PRICE_STATUS_ESTIMATED)
-        .setTotalPrice(totalPrice)
-        .setCurrencyCode(currencyCode)
-        .build());
-
-    builder
-      .setCardRequirements(
-        CardRequirements.newBuilder()
-          .addAllowedCardNetworks(
-            Arrays.asList(
-              WalletConstants.CARD_NETWORK_AMEX,
-              WalletConstants.CARD_NETWORK_DISCOVER,
-              WalletConstants.CARD_NETWORK_VISA,
-              WalletConstants.CARD_NETWORK_MASTERCARD))
-          .setBillingAddressRequired(billingAddressRequired)
-          .build())
-      .addAllowedPaymentMethod(WalletConstants.PAYMENT_METHOD_CARD)
-      .addAllowedPaymentMethod(WalletConstants.PAYMENT_METHOD_TOKENIZED_CARD)
-      .setEmailRequired(emailRequired)
-      .setShippingAddressRequired(shippingAddressRequired)
-      .setPhoneNumberRequired(phoneNumberRequired);
-
-    if (countryCodes.size() > 0) {
-      builder.setShippingAddressRequirements(
-        ShippingAddressRequirements.newBuilder()
-          .addAllowedCountryCodes(countryCodes)
-          .build());
-    }
-
-    builder.setPaymentMethodTokenizationParameters(createPaymentMethodTokenizationParameters());
-    return builder.build();
   }
 
   private void startPaymentRequest(@NonNull Activity activity, @NonNull PaymentDataRequest request) {
@@ -266,15 +203,8 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
     }
 
     this.payPromise = promise;
-    PaymentDataRequest request;
-    if (usePaymentIntent) {
-      request = createPaymentDataJsonRequest(payParams);
-    } else {
-      request = createPaymentDataRequest(payParams);
-    }
+    PaymentDataRequest request  = createPaymentDataJsonRequest(payParams);
     startPaymentRequest(activity, request);
-
-
   }
 
   @Override
@@ -316,25 +246,25 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
                 final PaymentMethodCreateParams paymentMethodCreateParams = PaymentMethodCreateParams.createFromGooglePay(paymentDataJson);
                 final Stripe stripe = getStripe();
                 stripe.createPaymentMethod(
-                  paymentMethodCreateParams,
-                  new ApiResultCallback<PaymentMethod>() {
-                    @Override
-                    public void onSuccess(@NonNull PaymentMethod paymentMethod) {
-                      WritableMap wm = convertPaymentMethodToWritableMap(paymentMethod);
-                      wm.putString("tokenId", paymentMethod.id);
-                      payPromise.resolve(wm);
-                      payPromise = null;
-                    }
+                        paymentMethodCreateParams,
+                        new ApiResultCallback<PaymentMethod>() {
+                          @Override
+                          public void onSuccess(@NonNull PaymentMethod paymentMethod) {
+                            WritableMap wm = convertPaymentMethodToWritableMap(paymentMethod);
+                            wm.putString("tokenId", paymentMethod.id);
+                            payPromise.resolve(wm);
+                            payPromise = null;
+                          }
 
-                    @Override
-                    public void onError(@NonNull Exception e) {
-                      payPromise.reject(
-                        getErrorCode("parseResponse"),
-                        getErrorDescription("parseResponse")
-                      );
-                      payPromise = null;
-                    }
-                  }
+                          @Override
+                          public void onError(@NonNull Exception e) {
+                            payPromise.reject(
+                                    getErrorCode("parseResponse"),
+                                    getErrorDescription("parseResponse")
+                            );
+                            payPromise = null;
+                          }
+                        }
                 );
               } catch (JSONException e) {
                 throw new RuntimeException(e);
