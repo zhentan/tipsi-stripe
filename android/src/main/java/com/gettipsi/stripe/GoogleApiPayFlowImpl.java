@@ -110,7 +110,7 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
       .setPaymentMethodTokenizationType(WalletConstants.PAYMENT_METHOD_TOKENIZATION_TYPE_PAYMENT_GATEWAY)
       .addParameter("gateway", "stripe")
       .addParameter("stripe:publishableKey", getPublishableKey())
-      .addParameter("stripe:version", BuildConfig.VERSION_NAME)
+      .addParameter("stripe:version", Stripe.VERSION_NAME)
       .build();
   }
 
@@ -159,7 +159,7 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
               .put("transactionInfo", new JSONObject()
                       .put("totalPrice", totalPrice)
                       .put("totalPriceStatus", "FINAL")
-                      .put("currencyCode", "currencyCode")
+                      .put("currencyCode", currencyCode)
                       .put("countryCode", countryCode)
               )
               .put("merchantInfo", new JSONObject()
@@ -270,9 +270,9 @@ public final class GoogleApiPayFlowImpl extends PayFlow {
                 throw new RuntimeException(e);
               }
             } else {
-              JSONObject tokenJson = null;
               try {
-                tokenJson = new JSONObject(paymentData.getPaymentMethodToken().getToken());
+                String tokenJsonString = new JSONObject(paymentData.toJson()).getJSONObject("paymentMethodData").getJSONObject("tokenizationData").getString("token");
+                JSONObject tokenJson = new JSONObject(tokenJsonString);
                 Token token = Token.fromJson(tokenJson);
                 if (token == null) {
                   payPromise.reject(
